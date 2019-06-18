@@ -287,7 +287,7 @@ class GrafanaCustomChart extends Component {
       this.chartRef = null;
       this.chart = null;
       this.timeFormat = 'MM/DD/YYYY HH:mm:ss';
-      this.c3TimeFormat = '%Y-%m-%d %H:%M:%S';
+      this.c3TimeFormat = '%Y-%m-%d %H:%M';
       this.panelType = '';
       switch(props.panel.type){
         case 'graph':
@@ -626,9 +626,12 @@ class GrafanaCustomChart extends Component {
 
       const xAxes = {
         type: 'timeseries',
+        // type : 'category',
         show: showAxis,
         tick: {
             format: self.c3TimeFormat,
+            // fit: true,
+            // centered: true
         }
       }; 
 
