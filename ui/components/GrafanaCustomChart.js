@@ -8,14 +8,13 @@ import { bindActionCreators } from 'redux';
 import dataFetch from '../lib/data-fetch';
 import { withSnackbar } from 'notistack';
 import { Chart, Line } from 'react-chartjs-2';
-import 'chartjs-plugin-colorschemes';
-import 'chartjs-plugin-deferred';
 import moment from 'moment';
 import OpenInNewIcon from '@material-ui/icons/OpenInNewOutlined';
 import GrafanaCustomGaugeChart from './GrafanaCustomGaugeChart';
+
+let c3;
 if (typeof window !== 'undefined') { 
-  require('chartjs-plugin-zoom');
-  // require('chartjs-plugin-streaming');
+  c3 = require('c3');
 }
 const grafanaStyles = theme => ({
     root: {
@@ -58,7 +57,15 @@ const grafanaStyles = theme => ({
     },
     cardHeader: {
       fontSize: theme.spacing(2),
-    }
+    },
+    error: {
+      color: '#D32F2F',
+      width: '100%',
+      textAlign: 'center',
+      fontSize: '12px',
+      // fontFamily: 'Helvetica Nueue',
+      fontWeight: 'bold',
+    },
   });
 
 const grafanaDateRangeToDate = (dt, startDate) => {
@@ -275,10 +282,12 @@ const grafanaDateRangeToDate = (dt, startDate) => {
 }
 
 class GrafanaCustomChart extends Component {
-    
     constructor(props){
       super(props);
+      this.chartRef = null;
+      this.chart = null;
       this.timeFormat = 'MM/DD/YYYY HH:mm:ss';
+      this.c3TimeFormat = '%Y-%m-%d %H:%M:%S';
       this.panelType = '';
       switch(props.panel.type){
         case 'graph':
@@ -291,11 +300,8 @@ class GrafanaCustomChart extends Component {
       
       this.datasetIndex = {};
       this.state = {
-        chartData: {
-          datasets: [],
-          labels: [],
-        },
-        options: {},
+        xAxis: [],
+        chartData: [],
         error: '',
       };
     }
@@ -304,64 +310,10 @@ class GrafanaCustomChart extends Component {
       this.configChartData();
     }
 
-    configureChartJSTooltip(){
-      const {classes} = this.props;
-      const self = this;
-      return function(tooltip) {
-        // Tooltip Element
-        var tooltipEl = self.tooltip;
-        // Hide if no tooltip
-        if (tooltip.opacity === 0) {
-          tooltipEl.style.opacity = 0;
-          return;
-        }
-        // Set caret Position
-        // tooltipEl.classList.remove('above', 'below', 'no-transform');
-        if (tooltip.yAlign) {
-          tooltipEl.classList.add(tooltip.yAlign);
-        } else {
-          tooltipEl.classList.add('no-transform');
-        }
-        // Set Text
-        if (tooltip.body) {
-          var titleLines = tooltip.title || [];
-          var bodyLines = tooltip.body.map(bodyItem => {
-            return bodyItem.lines;
-          });
-          var innerHtml = '<thead>';
-          titleLines.forEach(title => {
-            innerHtml += '<tr><th>' + title + '</th></tr>';
-          });
-          innerHtml += '</thead><tbody>';
-          bodyLines.forEach((body, i) => {
-            var colors = tooltip.labelColors[i];
-            var style = 'background:' + colors.backgroundColor;
-            style += '; border-color:' + colors.borderColor;
-            style += '; border-width: 2px';
-            var span = '<span class="'+ classes.chartjsTooltipKey +'" style="' + style + '"></span>';
-            innerHtml += '<tr><td>' + span + body + '</td></tr>';
-          });
-          innerHtml += '</tbody>';
-          var tableRoot = tooltipEl.querySelector('table');
-          tableRoot.innerHTML = innerHtml;
-        }
-        var positionY = this._chart.canvas.offsetTop;
-        var positionX = this._chart.canvas.offsetLeft;
-        // Display, position, and set styles for font
-        tooltipEl.style.opacity = 1;
-        tooltipEl.style.left = positionX + tooltip.caretX + 'px';
-        tooltipEl.style.top = positionY + tooltip.caretY + 'px';
-        tooltipEl.style.fontFamily = tooltip._bodyFontFamily;
-        tooltipEl.style.fontSize = `${tooltip.bodyFontSize}px`;
-        tooltipEl.style.fontStyle = tooltip._bodyFontStyle;
-        tooltipEl.style.padding = tooltip.yPadding + 'px ' + tooltip.xPadding + 'px';
-      };
-    }
-
     configChartData = () => {
       const { panel, refresh, liveTail } = this.props;
       const self = this;
-
+      // self.createOptions();
       if(panel.targets){
         panel.targets.forEach((target, ind) => {
           self.datasetIndex[`${ind}_0`] = ind;
@@ -372,9 +324,11 @@ class GrafanaCustomChart extends Component {
       }
       if(liveTail){
         self.interval = setInterval(function(){
+          // self.createOptions();
           self.collectChartData();
         }, self.computeRefreshInterval(refresh)*1000);
       }
+      // self.createOptions();
       self.collectChartData();
     }
 
@@ -448,10 +402,11 @@ class GrafanaCustomChart extends Component {
     }
 
     getData = async (ind, target, chartInst) => {
-      const {prometheusURL, grafanaURL, grafanaAPIKey, panel, from, to, templateVars, liveTail} = this.props;
-      const {data, chartData} = this.state;
+      const {prometheusURL, grafanaURL, panel, from, to, templateVars} = this.props;
+      const {chartData} = this.state;
+      let {xAxis} = this.state;
 
-      const cd = (typeof chartInst === 'undefined'?chartData:chartInst.data);
+      // const cd = (typeof chartInst === 'undefined'?chartData:chartInst.data);
       let queryRangeURL = '';
       if (prometheusURL && prometheusURL !== ''){
         queryRangeURL = `/api/prometheus/query_range`;
@@ -481,11 +436,12 @@ class GrafanaCustomChart extends Component {
         self.props.updateProgress({showProgress: false});
         if (typeof result !== 'undefined'){
           const fullData = self.transformDataForChart(result, target);
+          xAxis = ['x'];
           fullData.forEach(({metric, data}, di) => {
             const datasetInd = self.getOrCreateIndex(`${ind}_${di}`);
             const newData = [];
 
-            if (typeof cd.labels[datasetInd] === 'undefined' || typeof cd.datasets[datasetInd] === 'undefined'){
+            // if (typeof cd.labels[datasetInd] === 'undefined' || typeof cd.datasets[datasetInd] === 'undefined'){
               let legend = typeof target.legendFormat !== 'undefined'?target.legendFormat:'';
               if(legend === '') {
                 legend = Object.keys(metric).length > 0?JSON.stringify(metric):'';
@@ -497,47 +453,69 @@ class GrafanaCustomChart extends Component {
                 legend = legend.replace(`{{ `, '').replace(`{{`, '')
                             .replace(` }}`, '').replace(`}}`, '');
               }
-              cd.labels[datasetInd] = legend;
-              cd.datasets[datasetInd] = {
-                label: legend,
-                data: [],
-                pointRadius: 0,
-                // fill: false,
-                fill: true,
-              };
+              // cd.labels[datasetInd] = legend;
+              newData.push(legend);
+              // cd.datasets[datasetInd] = {
+              //   label: legend,
+              //   data: [],
+              //   pointRadius: 0,
+              //   // fill: false,
+              //   fill: true,
+              // };
               if(self.panelType === 'sparkline' && panel.sparkline && panel.sparkline.lineColor && panel.sparkline.fillColor){
                 cd.datasets[datasetInd].borderColor = panel.sparkline.lineColor;
                 cd.datasets[datasetInd].backgroundColor = panel.sparkline.fillColor;
               }
-            }
+            // }
             data.forEach(({x, y}) => {
-              let toadd = true;
-              cd.datasets[datasetInd].data.forEach(({x: x1, y: y1}) => {
-                if(x === x1) {
-                  toadd = false;
-                }
-              });
-              if(toadd){
-                newData.push({x, y});  
-              }
+              newData.push(y);
+              xAxis.push(new Date(x));
+              // let toadd = true;
+              // cd.datasets[datasetInd].data.forEach(({x: x1, y: y1}) => {
+              //   if(x === x1) {
+              //     toadd = false;
+              //   }
+              // });
+              // if(toadd){
+              //   newData.push({x, y});  
+              // }
             });
-            Array.prototype.push.apply(cd.datasets[datasetInd].data, newData);
-            cd.datasets[datasetInd].data.sort((a, b) => {
-              return new Date(a.x).getTime() - new Date(b.x).getTime();
-            })
+            // Array.prototype.push.apply(cd.datasets[datasetInd].data, newData);
+            // cd.datasets[datasetInd].data.sort((a, b) => {
+            //   return new Date(a.x).getTime() - new Date(b.x).getTime();
+            // })
+            chartData[datasetInd] = newData;
           });
-          if(typeof chartInst === 'undefined'){
-            for(let cddi=0;cddi < cd.datasets.length; cddi++){
-              if(typeof cd.datasets[cddi] === 'undefined'){
-                cd.datasets[cddi] = {data:[], label: ''};
+          let groups = [];
+          if (typeof panel.stack !== 'undefined' && panel.stack){
+            const panelGroups = [];
+            chartData.forEach(y => {
+              if(y.length > 0){
+                panelGroups.push(y[0]); // just the label
               }
-            }
-            self.setState({chartData, options: self.createOptions(), error:''});
-          } else {
-            chartInst.update({
-              preservation: true,
             });
+            groups = [panelGroups];
           }
+          // self.chart.load({
+          //   x: 'x',
+          //   columns: [xAxis, ...chartData],
+          //   groups,
+          //   type: 'area',
+          // });
+          self.createOptions(xAxis, chartData, groups);
+          self.setState({xAxis, chartData, error:''}); // Not TOO SURE IF THIS IS NEEDED
+          // if(typeof chartInst === 'undefined'){
+          //   for(let cddi=0;cddi < cd.datasets.length; cddi++){
+          //     if(typeof cd.datasets[cddi] === 'undefined'){
+          //       cd.datasets[cddi] = {data:[], label: ''};
+          //     }
+          //   }
+          //   self.setState({chartData, options: self.createOptions(), error:''});
+          // } else {
+          //   chartInst.update({
+          //     preservation: true,
+          //   });
+          // }
         }
       }, self.handleError);
     }
@@ -548,7 +526,7 @@ class GrafanaCustomChart extends Component {
             let fullData = [];
             data.data.result.forEach(r => {
               const localData = r.values.map(arr => {
-                const x = moment(arr[0] * 1000).format(this.timeFormat);
+                const x = arr[0] * 1000;
                 const y = parseFloat(parseFloat(arr[1]).toFixed(2));
                 return {
                   x,
@@ -637,64 +615,72 @@ class GrafanaCustomChart extends Component {
       }
     }
 
-    createOptions() {
+    createOptions(xAxis, chartData, groups) {
       const {panel, from, to} = this.props;
+      // const {xAxis, chartData} = this.state;
       const fromDate = grafanaDateRangeToDate(from);
       const toDate = grafanaDateRangeToDate(to);
       const self = this;
 
       const showAxis = panel.type ==='singlestat' && panel.sparkline && panel.sparkline.show === true?false:true;
 
+      const xAxes = {
+        type: 'timeseries',
+        show: showAxis,
+        tick: {
+            format: self.c3TimeFormat,
+        }
+      }; 
+
       const yAxes = {
-        stacked: (typeof panel.stack !== 'undefined' && panel.stack?true:false),
-        type: 'linear',
-        display: showAxis,
-        gridLines: {
-          display: showAxis,
-        },
+        show: showAxis,
       };
+      
       if(panel.yaxes){
         panel.yaxes.forEach(ya => {
           if(typeof ya.label !== 'undefined' && ya.label !== null){
-            yAxes.scaleLabel = {
-              display: true,
-              labelString: ya.label,
-            };
+            yAxes.label = ya.label;
           }
           if(ya.format.toLowerCase().startsWith('percent')){
             const mulFactor = ya.format.toLowerCase() === 'percentunit'?100:1;
-            yAxes.ticks = {
-              callback: function(tick) {
-                const tk = (tick * mulFactor).toFixed(2);
+            // yAxes.ticks = {
+            //   callback: function(tick) {
+            //     const tk = (tick * mulFactor).toFixed(2);
+            //     return `${tk}%`;
+            //   }
+            // }
+            yAxes.tick = {
+              format: function (d) { 
+                const tk = (d * mulFactor).toFixed(2);
                 return `${tk}%`;
               }
             }
           }
         });
       }
-      if(self.panelType === 'sparkline'){
-        yAxes.scaleLabel = {
-          display: false,
-          labelString: panel.format,
-        };
-      }
-      const xAxes = {
-        type: 'time',
-        display: showAxis,
-        time: {
-          min: fromDate.getTime(),
-          max: toDate.getTime(),
-        },
-      };
+      // if(self.panelType === 'sparkline'){
+      //   yAxes.scaleLabel = {
+      //     display: false,
+      //     labelString: panel.format,
+      //   };
+      // }
+      // const xAxes = {
+      //   type: 'time',
+      //   display: showAxis,
+      //   time: {
+      //     min: fromDate.getTime(),
+      //     max: toDate.getTime(),
+      //   },
+      // };
 
-      if (!showAxis) {
-        xAxes.gridLines = {
-            display: showAxis,
-        };
-        yAxes.gridLines = {
-          display: showAxis,
-        };
-      }
+      let grid = {
+        // x: {
+        //     show: showAxis,
+        // },
+        // y: {
+        //     show: showAxis,
+        // }
+      };
 
       // panel.xaxes.forEach(ya => {
       //   if(ya.label !== null){
@@ -708,79 +694,32 @@ class GrafanaCustomChart extends Component {
       if(panel.type !== 'graph'){
         shouldDisplayLegend = false;
       }
-        
-      return {
-          plugins: {
-            deferred: {
-              xOffset: 150,
-              yOffset: '50%',
-              delay: 500
-            },
-            colorschemes: {
-              // scheme: 'office.Office2007-2010-6'
-              scheme: 'brewer.RdYlGn4',
-              fillAlpha: 0.15,
-            },
-            // streaming: false,
-          },
-          responsive: true,
-          maintainAspectRatio: false,
-          title: {
-            display: false,
-            text: panel.title
-          },
-          tooltips: {
-            enabled: showAxis,
-            mode: 'index',
-            // mode: 'nearest',
-            intersect: false,
-            // enabled: false,
-            // custom: self.configureChartJSTooltip(),
-          },
-          hover: {
-            mode: 'nearest',
-            intersect: false,
-          },
-          legend: {
-            position: 'bottom',
-            display: shouldDisplayLegend,
-            // fullWidth: false,
-            labels: {
-              // fontStyle: 'normal',
-              fontSize: 10,
-              // padding: 5,
-              usePointStyle: true,
-            },
-          },
-          pan: {
-            enabled: panel.type === 'graph'?true:false,
-            mode: 'x',
-            rangeMin: {
-                x: null
-            },
-            rangeMax: {
-                x: null
-            },
-            onPan: self.updateDateRange(),
-          },
-          zoom: {
-              enabled: panel.type === 'graph'?true:false,
-              // drag: true, // if set to true will turn off pinch
-              mode: 'x',
-              speed: 0.05,
-              rangeMin: {
-                  x: null
-              },
-              rangeMax: {
-                  x: null
-              },
-              onZoom: self.updateDateRange(),
-          },
-          scales: {
-            xAxes: [xAxes],
-            yAxes: [yAxes],
-          },
+
+
+      self.chart = c3.generate({
+        // oninit: function(args){
+        //   console.log(JSON.stringify(args));
+        // },
+        bindto: self.chartRef,
+        data: {
+          x: 'x',
+          xFormat: self.c3TimeFormat,
+          columns: [xAxis, ...chartData],
+          groups,
+          type: 'area',
+        },
+        axis: {
+          x: xAxes,
+          y: yAxes,
+        },
+        grid: grid,
+        legend: {
+          show: shouldDisplayLegend,
+        },
+        point: {
+          show: false
         }
+      });
     }
 
     componentWillUnmount(){
@@ -830,15 +769,15 @@ class GrafanaCustomChart extends Component {
     
     render() {
       const { classes, board, panel, inDialog, handleChartDialogOpen } = this.props;
-      const {chartData, options, error} = this.state;
+      const {error} = this.state;
       let finalChartData = {
         datasets: [],
         labels: [],
       }
-      const filteredData = chartData.datasets.filter(x => typeof x !== 'undefined')
-      if(chartData.datasets.length === filteredData.length){
-        finalChartData = chartData;
-      }
+      // const filteredData = chartData.datasets.filter(x => typeof x !== 'undefined')
+      // if(chartData.datasets.length === filteredData.length){
+      //   finalChartData = chartData;
+      // }
       let self = this;
       let iconComponent = (<IconButton
           key="chartDialog"
@@ -860,16 +799,10 @@ class GrafanaCustomChart extends Component {
         );
       } else {
         mainChart = (
-          <React.Fragment>
-            <Line data={finalChartData} options={options} plugins={[
-              {
-                afterDraw: this.showMessageInChart(),
-              }
-            ]} />
-            <div className={classes.chartjsTooltip} ref={tp => this.tooltip = tp}>
-              <table></table>
-            </div>
-          </React.Fragment>
+          <div>
+            <div className={classes.error}>{error && 'There was an error communicating with the server'}</div>
+            <div ref={ch => self.chartRef = ch} className={classes.root}></div>
+          </div>
         );
       }
       return (

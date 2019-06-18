@@ -1,12 +1,5 @@
-import { Component, useEffect } from 'react';
-import PropTypes from 'prop-types';
-import { withStyles } from '@material-ui/core/styles';
-import { NoSsr, IconButton } from '@material-ui/core';
-import { updateProgress } from '../lib/store';
-import {connect} from "react-redux";
-import { bindActionCreators } from 'redux';
-import dataFetch from '../lib/data-fetch';
-import { withSnackbar } from 'notistack';
+import { useEffect } from 'react';
+import { NoSsr } from '@material-ui/core';
 import makeStyles from '@material-ui/styles/makeStyles';
 
 let c3;
