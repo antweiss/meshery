@@ -93,7 +93,7 @@ func (p *PrometheusClient) GetStaticBoard(ctx context.Context) (*models.GrafanaB
 		logrus.Error(err)
 		return nil, err
 	}
-	logrus.Debugf("Board json: %s", buf.String())
+	// logrus.Debugf("Board json: %s", buf.String())
 	return p.ImportGrafanaBoard(ctx, buf.Bytes())
 }
 
