@@ -14,7 +14,7 @@ require (
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/gorilla/sessions v1.2.0
 	github.com/gosimple/slug v1.7.0
-	github.com/grafana-tools/sdk v0.0.0-20190705114053-83ac18ae3b6c
+	github.com/grafana-tools/sdk v0.0.0-20190904193516-2c316049e450
 	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79 // indirect
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/howeyc/gopass v0.0.0-20170109162249-bf9dde6d0d2c // indirect
